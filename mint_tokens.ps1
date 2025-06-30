@@ -1,0 +1,2 @@
+# Mint 100,000,000 MIT tokens to your wallet using the correct owner private key
+cast send 0x0B306BF915C4d645ff596e518fAf3F9669b97016 "mint(address,uint256)" 0x88D2A0F1Ce61Db8D0667f025fAe3438572466fFf 100000000000000000000000000 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --rpc-url http://localhost:8545 --gas-limit 500000 --gas-price 1000000000 
