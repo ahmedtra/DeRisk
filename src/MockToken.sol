@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "forge-std/console.sol";
 
 /**
  * @title MockToken
@@ -26,5 +27,14 @@ contract MockToken is ERC20, Ownable {
      */
     function burn(uint256 amount) external {
         _burn(msg.sender, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        console.log("transferFrom called by:", msg.sender);
+        console.log("from:", from);
+        console.log("to:", to);
+        console.log("amount:", amount);
+        console.log("allowance:", allowance(from, msg.sender));
+        return super.transferFrom(from, to, amount);
     }
 } 

@@ -34,9 +34,22 @@ contract TestContracts is Script {
         console.log("Deployer token balance:", balance);
         
         // Test 2: Check registered events
-        InsuranceCore.Event memory btcEvent = insurance.getEvent(1);
-        console.log("BTC Event name:", btcEvent.name);
-        console.log("BTC Event active:", btcEvent.isActive);
+        (
+            string memory btcEventName,
+            string memory btcEventDescription,
+            uint256 btcEventTriggerThreshold,
+            bool btcEventIsTriggered,
+            uint256 btcEventTriggerTime,
+            uint256 btcEventTotalCoverage,
+            uint256 btcEventTotalPremiums,
+            uint256 btcEventBasePremium,
+            bool btcEventActive,
+            uint256 btcEventTotalInsurerCapital,
+            uint256 btcEventLastPremiumDistribution,
+            uint256 btcEventAccumulatedPremiums
+        ) = insurance.getEvent(1);
+        console.log("BTC Event name:", btcEventName);
+        console.log("BTC Event active:", btcEventActive);
         
         // Test 3: Register as insurer
         console.log("\n=== Testing Insurer Registration ===");
@@ -51,15 +64,24 @@ contract TestContracts is Script {
         // Test 5: Buy a policy
         console.log("\n=== Testing Policy Purchase ===");
         mockToken.approve(insuranceAddr, 1000e18);
-        insurance.buyPolicy(1, 5000e18); // BTC event, 5000 coverage
+        insurance.buyPolicy(1, 5000e18, 1000e18); // BTC event, 5000 coverage, 1000 premium
         console.log("Successfully bought BTC crash insurance policy");
         
         // Test 6: Check policy details
-        InsuranceCore.Policy memory policy = insurance.getPolicy(1);
-        console.log("Policy holder:", policy.policyHolder);
-        console.log("Policy coverage:", policy.coverage);
-        console.log("Policy premium:", policy.premium);
-        console.log("Policy active:", policy.isActive);
+        (
+            address policyHolder_,
+            ,
+            uint256 policyCoverage_,
+            uint256 policyPremium_,
+            ,
+            ,
+            bool policyActive_,
+            
+        ) = insurance.getPolicy(1);
+        console.log("Policy holder:", policyHolder_);
+        console.log("Policy coverage:", policyCoverage_);
+        console.log("Policy premium:", policyPremium_);
+        console.log("Policy active:", policyActive_);
         
         // Test 7: Oracle price update
         console.log("\n=== Testing Oracle ===");

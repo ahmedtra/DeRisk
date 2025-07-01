@@ -5,6 +5,10 @@ import "forge-std/Script.sol";
 import "../src/InsuranceCore.sol";
 import "../src/InsuranceOracle.sol";
 import "../src/MockToken.sol";
+import "../src/InsuranceInsurer.sol";
+import "../src/InsuranceReinsurer.sol";
+import "../src/InsurancePolicyHolder.sol";
+import "../src/InsuranceEvents.sol";
 
 /**
  * @title DeployInsurance
@@ -24,34 +28,36 @@ contract DeployInsurance is Script {
         InsuranceOracle oracle = new InsuranceOracle();
         console.log("InsuranceOracle deployed at:", address(oracle));
 
-        // Deploy insurance core
-        InsuranceCore insurance = new InsuranceCore(address(mockToken));
+        // Deploy modular contracts
+        InsurancePolicyHolder policyHolder = new InsurancePolicyHolder(address(mockToken));
+        InsuranceInsurer insurer = new InsuranceInsurer(address(mockToken));
+        InsuranceReinsurer reinsurer = new InsuranceReinsurer(address(mockToken));
+        InsuranceEvents eventsLogic = new InsuranceEvents();
+        // Deploy insurance core with modular addresses
+        InsuranceCore insurance = new InsuranceCore(address(policyHolder), address(insurer), address(reinsurer), address(eventsLogic));
         console.log("InsuranceCore deployed at:", address(insurance));
 
         // Register some events
-        uint256 btcEvent = insurance.registerEvent(
+        insurance.registerEvent(
             "BTC Crash",
             "Bitcoin drops more than 20% in one day",
             20, // 20% threshold
             500 // 5% base premium
         );
-        console.log("BTC Crash event registered with ID:", btcEvent);
 
-        uint256 aaveEvent = insurance.registerEvent(
+        insurance.registerEvent(
             "AAVE Hack",
             "AAVE protocol gets hacked or exploited",
             100, // 100% threshold (any hack)
             1000 // 10% base premium
         );
-        console.log("AAVE Hack event registered with ID:", aaveEvent);
 
-        uint256 ethEvent = insurance.registerEvent(
+        insurance.registerEvent(
             "ETH Crash",
             "Ethereum drops more than 30% in one day",
             30, // 30% threshold
             800 // 8% base premium
         );
-        console.log("ETH Crash event registered with ID:", ethEvent);
 
         vm.stopBroadcast();
 

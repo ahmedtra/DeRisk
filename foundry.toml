@@ -6,3 +6,9 @@ libs = ["lib"]
 remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/"
 ]
+
+exclude = ["src/InsuranceInsurer.sol", "src/InsuranceReinsurer.sol"]
+
+via_ir = true
+optimizer = true
+optimizer_runs = 200
