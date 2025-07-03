@@ -22,8 +22,9 @@ import "./InsurancePolicyHolder.sol";
  * - 7-day lockup period for new policies
  * - Capital allocation to specific events
  * - Continuous premium distribution based on dynamic APY
+ * - Virtual token management for efficient cross-contract operations
  */
-contract InsuranceCore is Ownable {
+contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
     using Counters for Counters.Counter;
     
     // All state variables and constants have been moved to InsuranceStorage.sol
@@ -34,11 +35,58 @@ contract InsuranceCore is Ownable {
     IInsuranceReinsurer public reinsurer;
     IInsuranceEvents public eventsLogic;
 
-    constructor(address _policyHolder, address _insurer, address _reinsurer, address _eventsLogic) {
+    constructor(address _paymentToken, address _policyHolder, address _insurer, address _reinsurer, address _eventsLogic) {
+        paymentToken = IERC20(_paymentToken);
         policyHolder = IInsurancePolicyHolder(_policyHolder);
         insurer = IInsuranceInsurer(_insurer);
         reinsurer = IInsuranceReinsurer(_reinsurer);
         eventsLogic = IInsuranceEvents(_eventsLogic);
+    }
+
+    // --- Virtual Token Management Functions ---
+
+    /**
+     * @dev Deposit tokens into the system for virtual management
+     * @param amount Amount of tokens to deposit
+     */
+    function depositTokens(uint256 amount) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(paymentToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        
+        userBalances[msg.sender] += amount;
+        totalSystemLiquidity += amount;
+        
+        emit TokensDeposited(msg.sender, amount);
+    }
+
+    /**
+     * @dev Withdraw tokens from user's virtual balance
+     * @param amount Amount of tokens to withdraw
+     */
+    function withdrawTokens(uint256 amount) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(userBalances[msg.sender] >= amount, "Insufficient balance");
+        
+        userBalances[msg.sender] -= amount;
+        totalSystemLiquidity -= amount;
+        
+        require(paymentToken.transfer(msg.sender, amount), "Transfer failed");
+        
+        emit TokensWithdrawn(msg.sender, amount);
+    }
+
+    /**
+     * @dev Get user's total available balance (deposited - locked in roles)
+     */
+    function getUserBalance(address user) external view returns (uint256) {
+        return userBalances[user];
+    }
+
+    /**
+     * @dev Get user's total locked collateral across all roles
+     */
+    function getUserLockedCollateral(address user) external view returns (uint256) {
+        return insurerCollateral[user] + reinsurerCollateral[user] + policyHolderFunds[user];
     }
 
     // --- Only interface calls to eventsLogic and coordination logic below ---
@@ -72,11 +120,18 @@ contract InsuranceCore is Ownable {
     }
 
     // Policy functions
-    function buyPolicy(uint256 eventId, uint256 coverage, uint256 premium) external onlyOwner {
-        policyHolder.buyPolicy(eventId, coverage, premium);
+    function buyPolicy(uint256 eventId, uint256 coverage, uint256 premium) external nonReentrant {
+        require(userBalances[msg.sender] >= premium, "Insufficient balance");
+        
+        // Virtual transfer: move tokens from user balance to policy holder funds
+        userBalances[msg.sender] -= premium;
+        policyHolderFunds[msg.sender] += premium;
+        
+        // Call the policy holder contract
+        policyHolder.buyPolicy(msg.sender, eventId, coverage, premium);
     }
     function activatePolicy(uint256 policyId) external {
-        policyHolder.activatePolicy(policyId);
+        policyHolder.activatePolicy(msg.sender, policyId);
     }
     function getPolicy(uint256 policyId) external view returns (
         address policyHolder_,
@@ -91,17 +146,43 @@ contract InsuranceCore is Ownable {
         return policyHolder.getPolicy(policyId);
     }
 
-    // Insurer functions
-    function registerInsurer(uint256 collateral) external onlyOwner {
-        insurer.registerInsurer(collateral);
+    // Insurer functions - Updated for virtual token management
+    function registerInsurer(uint256 collateral) external nonReentrant {
+        require(userBalances[msg.sender] >= collateral, "Insufficient balance");
+        require(collateral >= MIN_COLLATERAL, "Insufficient collateral");
+        
+        // Virtual transfer: move tokens from user balance to insurer collateral
+        userBalances[msg.sender] -= collateral;
+        insurerCollateral[msg.sender] += collateral;
+        
+        // Register in InsuranceInsurer contract
+        insurer.registerInsurer(msg.sender, collateral);
+        
+        emit InsurerRegistered(msg.sender, collateral);
     }
-    function allocateToEvent(uint256 eventId, uint256 amount) external onlyOwner {
+
+    function allocateToEvent(uint256 eventId, uint256 amount) external {
         insurer.allocateToEvent(eventId, amount);
     }
-    function removeFromEvent(uint256 eventId, uint256 amount) external onlyOwner {
+    function removeFromEvent(uint256 eventId, uint256 amount) external {
         insurer.removeFromEvent(eventId, amount);
     }
-    function claimInsurerPremiums() external onlyOwner {
+    function addInsurerCapital(uint256 amount) external nonReentrant {
+        require(userBalances[msg.sender] >= amount, "Insufficient balance");
+        
+        // Check if user is registered as insurer through the InsuranceInsurer contract
+        require(insurer.isRegisteredInsurer(msg.sender), "Not registered as insurer");
+        
+        // Virtual transfer: move tokens from user balance to insurer collateral
+        userBalances[msg.sender] -= amount;
+        insurerCollateral[msg.sender] += amount;
+        
+        // Update the insurer contract
+        insurer.addInsurerCapital(msg.sender, amount);
+        
+        emit InsurerCapitalAdded(msg.sender, amount);
+    }
+    function claimInsurerPremiums() external {
         insurer.claimInsurerPremiums();
     }
     function getInsurerEventAllocation(address insurerAddr, uint256 eventId) external view returns (uint256) {
@@ -120,11 +201,22 @@ contract InsuranceCore is Ownable {
         return insurer.getInsurerAccumulatedPremiums(insurerAddr);
     }
 
-    // Reinsurer functions
-    function registerReinsurer(uint256 collateral) external onlyOwner {
-        reinsurer.registerReinsurer(collateral);
+    // Reinsurer functions - Updated for virtual token management
+    function registerReinsurer(uint256 collateral) external nonReentrant {
+        require(userBalances[msg.sender] >= collateral, "Insufficient balance");
+        require(collateral >= MIN_COLLATERAL, "Insufficient collateral");
+        
+        // Virtual transfer: move tokens from user balance to reinsurer collateral
+        userBalances[msg.sender] -= collateral;
+        reinsurerCollateral[msg.sender] += collateral;
+        
+        // Register in InsuranceReinsurer contract
+        reinsurer.registerReinsurer(msg.sender, collateral);
+        
+        emit ReinsurerRegistered(msg.sender, collateral);
     }
-    function claimReinsurerPremiums() external onlyOwner {
+
+    function claimReinsurerPremiums() external {
         reinsurer.claimReinsurerPremiums();
     }
     function getReinsurerAccumulatedPremiums(address reinsurerAddr) external view returns (uint256) {
@@ -166,4 +258,27 @@ contract InsuranceCore is Ownable {
     function calculatePremium(uint256 eventId, uint256 coverage) external view returns (uint256) {
         return eventsLogic.calculatePremium(eventId, coverage);
     }
+
+    // Events
+    event TokensDeposited(address indexed user, uint256 amount);
+    event TokensWithdrawn(address indexed user, uint256 amount);
+    event InsurerRegistered(address indexed insurer, uint256 collateral);
+    event ReinsurerRegistered(address indexed reinsurer, uint256 collateral);
+    event InsurerCapitalAdded(address indexed insurer, uint256 amount);
+
+    /**
+     * @dev Process a claim payout (called by InsuranceInsurer)
+     */
+    function processClaim(address policyHolderAddr, uint256 policyId, uint256 payout) external nonReentrant {
+        require(msg.sender == address(insurer), "Only insurer can process claim");
+        require(payout > 0, "Payout must be > 0");
+        // Optionally, check policy is not already claimed (for extra safety)
+        (,,,,,,,bool isClaimed) = policyHolder.getPolicy(policyId);
+        require(!isClaimed, "Policy already claimed");
+        // Credit payout to user's virtual balance
+        userBalances[policyHolderAddr] += payout;
+        // Optionally, deduct from insurer collateral (not implemented here, but can be added)
+        emit ClaimProcessed(policyHolderAddr, policyId, payout);
+    }
+    event ClaimProcessed(address indexed policyHolder, uint256 indexed policyId, uint256 payout);
 } 

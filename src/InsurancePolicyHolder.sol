@@ -43,7 +43,7 @@ contract InsurancePolicyHolder {
         eventsLogic = InsuranceEvents(_eventsLogic);
     }
 
-    function buyPolicy(uint256 eventId, uint256 coverage, uint256 premium) external {
+    function buyPolicy(address policyHolderAddr, uint256 eventId, uint256 coverage, uint256 premium) external {
         // Check event exists and is active
         (string memory name,,,,,,,,bool isActive,,,) = eventsLogic.getEvent(eventId);
         require(bytes(name).length != 0, "Event does not exist");
@@ -52,11 +52,15 @@ contract InsurancePolicyHolder {
         require(eventInsurerCapital[eventId] > 0, "No insurer capital for event");
         require(coverage > 0, "Coverage must be > 0");
         require(premium > 0, "Premium must be > 0");
-        paymentToken.transferFrom(msg.sender, address(this), premium);
+        
+        // For virtual token management, we need to check if the user has sufficient balance
+        // This will be handled by the InsuranceCore contract calling this function
+        // The actual token transfer is handled at the InsuranceCore level
+        
         _policyIds.increment();
         uint256 policyId = _policyIds.current();
         policies[policyId] = Policy({
-            policyHolder: msg.sender,
+            policyHolder: policyHolderAddr,
             eventId: eventId,
             coverage: coverage,
             premium: premium,
@@ -65,12 +69,12 @@ contract InsurancePolicyHolder {
             isActive: false,
             isClaimed: false
         });
-        emit PolicyCreated(policyId, msg.sender, eventId, premium, coverage);
+        emit PolicyCreated(policyId, policyHolderAddr, eventId, premium, coverage);
     }
 
-    function activatePolicy(uint256 policyId) external {
+    function activatePolicy(address policyHolderAddr, uint256 policyId) external {
         Policy storage policy = policies[policyId];
-        require(policy.policyHolder == msg.sender, "Not policy holder");
+        require(policy.policyHolder == policyHolderAddr, "Not policy holder");
         require(block.timestamp >= policy.activationTime, "Lockup not expired");
         require(!policy.isActive, "Already active");
         policy.isActive = true;
@@ -125,8 +129,8 @@ contract InsurancePolicyHolder {
 
 // Interface for InsuranceCore to interact with
 interface IInsurancePolicyHolder {
-    function buyPolicy(uint256 eventId, uint256 coverage, uint256 premium) external;
-    function activatePolicy(uint256 policyId) external;
+    function buyPolicy(address policyHolderAddr, uint256 eventId, uint256 coverage, uint256 premium) external;
+    function activatePolicy(address policyHolderAddr, uint256 policyId) external;
     function getPolicy(uint256 policyId) external view returns (
         address policyHolder_,
         uint256 eventId,

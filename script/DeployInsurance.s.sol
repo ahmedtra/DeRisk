@@ -33,8 +33,15 @@ contract DeployInsurance is Script {
         InsuranceInsurer insurer = new InsuranceInsurer(address(mockToken));
         InsuranceReinsurer reinsurer = new InsuranceReinsurer(address(mockToken));
         InsuranceEvents eventsLogic = new InsuranceEvents();
-        // Deploy insurance core with modular addresses
-        InsuranceCore insurance = new InsuranceCore(address(policyHolder), address(insurer), address(reinsurer), address(eventsLogic));
+        
+        // Deploy insurance core with payment token and modular addresses
+        InsuranceCore insurance = new InsuranceCore(
+            address(mockToken),  // payment token
+            address(policyHolder), 
+            address(insurer), 
+            address(reinsurer), 
+            address(eventsLogic)
+        );
         console.log("InsuranceCore deployed at:", address(insurance));
 
         // Register some events
@@ -58,6 +65,9 @@ contract DeployInsurance is Script {
             30, // 30% threshold
             800 // 8% base premium
         );
+
+        // After deploying contracts
+        insurer.setCore(address(insurance));
 
         vm.stopBroadcast();
 

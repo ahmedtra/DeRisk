@@ -42,7 +42,7 @@ contract InsuranceTest is Test {
         insurer = new InsuranceInsurer(address(mockToken));
         reinsurer = new InsuranceReinsurer(address(mockToken));
         eventsLogic = new InsuranceEvents();
-        insurance = new InsuranceCore(address(policyHolder), address(insurer), address(reinsurer), address(eventsLogic));
+        insurance = new InsuranceCore(address(mockToken), address(policyHolder), address(insurer), address(reinsurer), address(eventsLogic));
         // Mint tokens to test accounts
         mockToken.mint(alice, 100000e18);
         mockToken.mint(bob, 100000e18);
@@ -80,17 +80,21 @@ contract InsuranceTest is Test {
         policyHolder.setInsurer(address(insurer));
         insurer.setPolicyHolder(address(policyHolder));
         insurer.setEventsLogic(address(eventsLogic));
+        insurer.setCore(address(insurance));
     }
 
     function testDeployment() public {
         assertEq(mockToken.balanceOf(alice), 100000e18);
     }
 
-
     function testRegisterInsurer() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10000e18);
+        insurance.depositTokens(10000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
@@ -101,8 +105,12 @@ contract InsuranceTest is Test {
 
     function testRegisterReinsurer() public {
         vm.startPrank(bob);
-        mockToken.approve(address(reinsurer), 20000e18);
-        reinsurer.registerReinsurer(20000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 20000e18);
+        insurance.depositTokens(20000e18);
+        
+        // Register as reinsurer through InsuranceCore
+        insurance.registerReinsurer(20000e18);
         vm.stopPrank();
         (uint256 collateral, , , bool isActive) = reinsurer.reinsurers(bob);
         assertTrue(isActive);
@@ -112,22 +120,28 @@ contract InsuranceTest is Test {
     function testBuyPolicy() public {
         // Register insurer and allocate capital first
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10000e18);
+        insurance.depositTokens(10000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
-        // Fund insurer contract for payout
-        mockToken.transfer(address(insurer), 10000e18);
         vm.stopPrank();
         // Buy policy
         vm.startPrank(bob);
-        mockToken.approve(address(policyHolder), 1000e18);
-        policyHolder.buyPolicy(btcEventId, 5000e18, 1000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 1000e18);
+        insurance.depositTokens(1000e18);
+        
+        // Buy policy through InsuranceCore
+        insurance.buyPolicy(btcEventId, 5000e18, 1000e18);
         vm.stopPrank();
         // Activate policy after lockup
         vm.startPrank(bob);
         vm.warp(604801);
-        policyHolder.activatePolicy(1);
+        insurance.activatePolicy(1);
         vm.stopPrank();
         // Trigger event
         vm.startPrank(alice);
@@ -135,9 +149,9 @@ contract InsuranceTest is Test {
         vm.stopPrank();
         // Claim policy via insurer
         vm.startPrank(bob);
-        uint256 balanceBefore = mockToken.balanceOf(bob);
+        uint256 balanceBefore = insurance.getUserBalance(bob);
         insurer.claimPolicy(1);
-        uint256 balanceAfter = mockToken.balanceOf(bob);
+        uint256 balanceAfter = insurance.getUserBalance(bob);
         (address policyHolder_, uint256 eventId_, uint256 coverage_, uint256 premium_, uint256 startTime_, uint256 activationTime_, bool isActive_, bool isClaimed_) = policyHolder.getPolicy(1);
         assertEq(policyHolder_, bob);
         assertEq(eventId_, btcEventId);
@@ -152,16 +166,24 @@ contract InsuranceTest is Test {
     function testActivatePolicy() public {
         // Register insurer first
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10000e18);
+        insurance.depositTokens(10000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         emit log_string("Insurer registered and capital allocated");
         vm.stopPrank();
         // Buy policy
         vm.startPrank(bob);
-        mockToken.approve(address(policyHolder), 1000e18);
-        policyHolder.buyPolicy(btcEventId, 5000e18, 1000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 1000e18);
+        insurance.depositTokens(1000e18);
+        
+        // Buy policy through InsuranceCore
+        insurance.buyPolicy(btcEventId, 5000e18, 1000e18);
         emit log_string("Policy bought");
         (address holder, uint256 eventId, uint256 coverage, uint256 premium, , , bool isActive_, bool isClaimed) = policyHolder.getPolicy(1);
         emit log_address(holder);
@@ -174,13 +196,13 @@ contract InsuranceTest is Test {
         // Try to activate before lockup period
         vm.startPrank(bob);
         vm.expectRevert("Lockup not expired");
-        policyHolder.activatePolicy(1);
+        insurance.activatePolicy(1);
         emit log_string("Tried to activate before lockup");
         vm.stopPrank();
         // Fast forward time and activate
         vm.warp(block.timestamp + 8 days);
         vm.startPrank(bob);
-        policyHolder.activatePolicy(1);
+        insurance.activatePolicy(1);
         emit log_string("Activated after lockup");
         (holder, eventId, coverage, premium, , , isActive_, isClaimed) = policyHolder.getPolicy(1);
         emit log_address(holder);
@@ -196,8 +218,12 @@ contract InsuranceTest is Test {
     function testCalculatePremium() public {
         // Register insurer and allocate capital first
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10000e18);
+        insurance.depositTokens(10000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
@@ -210,25 +236,35 @@ contract InsuranceTest is Test {
     function testTriggerEvent() public {
         // Register insurer and allocate capital
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10000e18);
+        insurance.depositTokens(10000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
-        // Fund insurer contract for payout
-        mockToken.transfer(address(insurer), 10000e18);
         vm.stopPrank();
         // Register reinsurer
         vm.startPrank(bob);
-        mockToken.approve(address(reinsurer), 20000e18);
-        reinsurer.registerReinsurer(20000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 20000e18);
+        insurance.depositTokens(20000e18);
+        
+        // Register as reinsurer through InsuranceCore
+        insurance.registerReinsurer(20000e18);
         vm.stopPrank();
         // Buy and activate policy
         vm.startPrank(charlie);
-        mockToken.approve(address(policyHolder), 1000e18);
-        policyHolder.buyPolicy(btcEventId, 5000e18, 1000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 1000e18);
+        insurance.depositTokens(1000e18);
+        
+        // Buy policy through InsuranceCore
+        insurance.buyPolicy(btcEventId, 5000e18, 1000e18);
         vm.warp(604801);
-        policyHolder.activatePolicy(1);
-        uint256 balanceBefore = mockToken.balanceOf(charlie);
+        insurance.activatePolicy(1);
+        uint256 balanceBefore = insurance.getUserBalance(charlie);
         vm.stopPrank();
         // Trigger event
         vm.startPrank(alice);
@@ -237,7 +273,7 @@ contract InsuranceTest is Test {
         // Claim policy via insurer
         vm.startPrank(charlie);
         insurer.claimPolicy(1);
-        uint256 balanceAfter = mockToken.balanceOf(charlie);
+        uint256 balanceAfter = insurance.getUserBalance(charlie);
         assertGt(balanceAfter, balanceBefore);
         vm.stopPrank();
     }
@@ -245,24 +281,30 @@ contract InsuranceTest is Test {
     function testMultiplePolicies() public {
         // Register insurer and allocate capital to two events
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10000e18);
+        insurance.depositTokens(10000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
         insurer.allocateToEvent(aaveEventId, 5000e18);
         policyHolder.setEventInsurerCapital(aaveEventId, 5000e18);
-        // Fund insurer contract for payout
-        mockToken.transfer(address(insurer), 10000e18);
         vm.stopPrank();
         // Buy two policies
         vm.startPrank(charlie);
-        mockToken.approve(address(policyHolder), 2000e18);
-        policyHolder.buyPolicy(btcEventId, 5000e18, 1000e18);
-        policyHolder.buyPolicy(aaveEventId, 3000e18, 1000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 2000e18);
+        insurance.depositTokens(2000e18);
+        
+        // Buy policies through InsuranceCore
+        insurance.buyPolicy(btcEventId, 5000e18, 1000e18);
+        insurance.buyPolicy(aaveEventId, 3000e18, 1000e18);
         // Activate both policies after lockup
         vm.warp(604801);
-        policyHolder.activatePolicy(1);
-        policyHolder.activatePolicy(2);
+        insurance.activatePolicy(1);
+        insurance.activatePolicy(2);
         vm.stopPrank();
         // Trigger BTC event
         vm.startPrank(alice);
@@ -305,27 +347,36 @@ contract InsuranceTest is Test {
 
     function test_RevertWhen_InsufficientCollateral() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 500e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 500e18);
+        insurance.depositTokens(500e18);
+        
         vm.expectRevert("Insufficient collateral");
-        insurer.registerInsurer(500e18);
+        insurance.registerInsurer(500e18);
         vm.stopPrank();
     }
 
     function test_RevertWhen_DuplicateRegistration() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 20000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 20000e18);
+        insurance.depositTokens(20000e18);
+        
+        insurance.registerInsurer(10000e18);
         vm.expectRevert("Already registered");
-        insurer.registerInsurer(10000e18);
+        insurance.registerInsurer(10000e18);
         vm.stopPrank();
     }
 
     function test_RevertWhen_BuyPolicyWithoutInsurer() public {
         // No insurers registered
         vm.startPrank(alice);
-        mockToken.approve(address(policyHolder), 1000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 1000e18);
+        insurance.depositTokens(1000e18);
+        
         vm.expectRevert();
-        policyHolder.buyPolicy(btcEventId, 5000e18, 1000e18);
+        insurance.buyPolicy(btcEventId, 5000e18, 1000e18);
         vm.stopPrank();
     }
 
@@ -356,10 +407,13 @@ contract InsuranceTest is Test {
 
     function testAddInsurerCapital() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
-        mockToken.approve(address(insurer), 5000e18);
-        insurer.addInsurerCapital(5000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 15000e18);
+        insurance.depositTokens(15000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
+        insurance.addInsurerCapital(5000e18);
         insurer.allocateToEvent(btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
         vm.stopPrank();
@@ -370,22 +424,23 @@ contract InsuranceTest is Test {
 
     function testAddInsurerCapitalMultipleTimes() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 20000e18);
+        insurance.depositTokens(20000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         // Add capital multiple times
-        mockToken.approve(address(insurer), 5000e18);
-        insurer.addInsurerCapital(5000e18);
+        insurance.addInsurerCapital(5000e18);
         insurer.allocateToEvent(btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
-        mockToken.approve(address(insurer), 3000e18);
-        insurer.addInsurerCapital(3000e18);
+        insurance.addInsurerCapital(3000e18);
         insurer.allocateToEvent(btcEventId, 3000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 3000e18);
-        mockToken.approve(address(insurer), 2000e18);
-        insurer.addInsurerCapital(2000e18);
+        insurance.addInsurerCapital(2000e18);
         insurer.allocateToEvent(btcEventId, 2000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 2000e18);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
@@ -396,14 +451,17 @@ contract InsuranceTest is Test {
 
     function testAddInsurerCapitalWithLargeAmount() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 60000e18);
+        insurance.depositTokens(60000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         uint256 largeAmount = 50000e18;
-        mockToken.approve(address(insurer), largeAmount);
-        insurer.addInsurerCapital(largeAmount);
+        insurance.addInsurerCapital(largeAmount);
         insurer.allocateToEvent(btcEventId, largeAmount);
         policyHolder.setEventInsurerCapital(btcEventId, largeAmount);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
@@ -414,14 +472,17 @@ contract InsuranceTest is Test {
 
     function testAddInsurerCapitalWithSmallAmount() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 10001e18);
+        insurance.depositTokens(10001e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         uint256 smallAmount = 1e18;
-        mockToken.approve(address(insurer), smallAmount);
-        insurer.addInsurerCapital(smallAmount);
+        insurance.addInsurerCapital(smallAmount);
         insurer.allocateToEvent(btcEventId, smallAmount);
         policyHolder.setEventInsurerCapital(btcEventId, smallAmount);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
@@ -432,19 +493,26 @@ contract InsuranceTest is Test {
 
     function testAddInsurerCapitalAfterPolicyCreation() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 15000e18);
+        insurance.depositTokens(15000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
         vm.startPrank(bob);
-        mockToken.approve(address(policyHolder), 1000e18);
-        policyHolder.buyPolicy(btcEventId, 5000e18, 1000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 1000e18);
+        insurance.depositTokens(1000e18);
+        
+        // Buy policy through InsuranceCore
+        insurance.buyPolicy(btcEventId, 5000e18, 1000e18);
         vm.stopPrank();
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 5000e18);
-        insurer.addInsurerCapital(5000e18);
+        insurance.addInsurerCapital(5000e18);
         insurer.allocateToEvent(btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
@@ -455,31 +523,46 @@ contract InsuranceTest is Test {
 
     function testAddInsurerCapitalTokenTransfer() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 15000e18);
+        insurance.depositTokens(15000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
-        uint256 balanceBefore = mockToken.balanceOf(alice);
+        
+        uint256 balanceBefore = insurance.getUserBalance(alice);
         uint256 additionalAmount = 5000e18;
-        mockToken.approve(address(insurer), additionalAmount);
-        insurer.addInsurerCapital(additionalAmount);
-        uint256 balanceAfter = mockToken.balanceOf(alice);
+        
+        // Add capital through InsuranceCore (virtual transfer)
+        insurance.addInsurerCapital(additionalAmount);
+        
+        uint256 balanceAfter = insurance.getUserBalance(alice);
         assertEq(balanceAfter, balanceBefore - additionalAmount);
         vm.stopPrank();
     }
 
     function testAddInsurerCapitalContractBalance() public {
         vm.startPrank(alice);
-        mockToken.approve(address(insurer), 10000e18);
-        insurer.registerInsurer(10000e18);
+        // First deposit tokens to InsuranceCore for virtual management
+        mockToken.approve(address(insurance), 15000e18);
+        insurance.depositTokens(15000e18);
+        
+        // Register as insurer through InsuranceCore
+        insurance.registerInsurer(10000e18);
         insurer.allocateToEvent(btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
-        uint256 contractBalanceBefore = mockToken.balanceOf(address(insurer));
+        
+        uint256 contractBalanceBefore = mockToken.balanceOf(address(insurance));
         uint256 additionalAmount = 5000e18;
-        mockToken.approve(address(insurer), additionalAmount);
-        insurer.addInsurerCapital(additionalAmount);
-        uint256 contractBalanceAfter = mockToken.balanceOf(address(insurer));
-        assertEq(contractBalanceAfter, contractBalanceBefore + additionalAmount);
+        
+        // Add capital through InsuranceCore (virtual transfer)
+        insurance.addInsurerCapital(additionalAmount);
+        
+        uint256 contractBalanceAfter = mockToken.balanceOf(address(insurance));
+        // Contract balance should remain the same since it's virtual transfer
+        assertEq(contractBalanceAfter, contractBalanceBefore);
         vm.stopPrank();
     }
 } 

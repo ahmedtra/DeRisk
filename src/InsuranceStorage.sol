@@ -16,6 +16,13 @@ contract InsuranceStorage {
     uint256 public constant DISTRIBUTION_INTERVAL = 1 seconds;
     Counters.Counter internal _policyIds;
 
+    // Virtual token management
+    mapping(address => uint256) public userBalances;        // User's available balance
+    mapping(address => uint256) public insurerCollateral;   // Insurer's locked collateral
+    mapping(address => uint256) public reinsurerCollateral; // Reinsurer's locked collateral
+    mapping(address => uint256) public policyHolderFunds;   // Policy holder's funds (premiums paid)
+    uint256 public totalSystemLiquidity;                   // Total tokens in the system
+
     struct Policy {
         address policyHolder;
         uint256 eventId;

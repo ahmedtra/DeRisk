@@ -7,8 +7,8 @@ import "../src/MockToken.sol";
 contract MintMockToken is Script {
     function run() external {
         uint256 ownerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address to = 0x88D2A0F1Ce61Db8D0667f025fAe3438572466fFf;
-        address mockTokenAddr = 0x5FbDB2315678afecb367f032d93F642f64180aa3; // update if needed
+        address to = 0x7019758Fc03CE9C0875a33cf620938c9468A4e0C; // Your MetaMask address
+        address mockTokenAddr = 0x22753E4264FDDc6181dc7cce468904A80a363E44; // Updated MockToken address
         uint256 amount = 10000e18; // 10,000 tokens
 
         vm.startBroadcast(ownerPrivateKey);
