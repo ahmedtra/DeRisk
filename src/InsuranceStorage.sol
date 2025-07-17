@@ -2,10 +2,8 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
 
 contract InsuranceStorage {
-    using Counters for Counters.Counter;
 
     IERC20 public paymentToken;
     uint256 public constant LOCKUP_PERIOD = 7 days;
@@ -14,7 +12,7 @@ contract InsuranceStorage {
     uint256 public constant TARGET_APY_REINSURER = 1000;
     uint256 public lastDistributionTime;
     uint256 public constant DISTRIBUTION_INTERVAL = 1 seconds;
-    Counters.Counter internal _policyIds;
+    uint256 internal _policyIds;
 
     // Virtual token management
     mapping(address => uint256) public userBalances;        // User's available balance

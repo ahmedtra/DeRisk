@@ -11,7 +11,7 @@ import "forge-std/console.sol";
  */
 contract MockToken is ERC20, Ownable {
     
-    constructor() ERC20("Mock Insurance Token", "MIT") {
+    constructor() ERC20("Mock Insurance Token", "MIT") Ownable(msg.sender) {
         _mint(msg.sender, 1000000 * 10**decimals()); // 1M tokens
     }
 

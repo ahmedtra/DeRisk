@@ -2,9 +2,9 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./InsuranceStorage.sol";
 import "./InsuranceEvents.sol";
@@ -25,7 +25,7 @@ import "./InsurancePolicyHolder.sol";
  * - Virtual token management for efficient cross-contract operations
  */
 contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
-    using Counters for Counters.Counter;
+
     
     // All state variables and constants have been moved to InsuranceStorage.sol
     // Do not redeclare them here.
@@ -35,7 +35,7 @@ contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
     IInsuranceReinsurer public reinsurer;
     IInsuranceEvents public eventsLogic;
 
-    constructor(address _paymentToken, address _policyHolder, address _insurer, address _reinsurer, address _eventsLogic) {
+    constructor(address _paymentToken, address _policyHolder, address _insurer, address _reinsurer, address _eventsLogic) Ownable(msg.sender) {
         paymentToken = IERC20(_paymentToken);
         policyHolder = IInsurancePolicyHolder(_policyHolder);
         insurer = IInsuranceInsurer(_insurer);
@@ -97,7 +97,7 @@ contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
         string memory description,
         uint256 triggerThreshold,
         uint256 basePremium
-    ) external onlyOwner {
+    ) external {
         eventsLogic.registerEvent(name, description, triggerThreshold, basePremium);
     }
 
@@ -162,10 +162,10 @@ contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
     }
 
     function allocateToEvent(uint256 eventId, uint256 amount) external {
-        insurer.allocateToEvent(eventId, amount);
+        insurer.allocateToEvent(msg.sender, eventId, amount);
     }
     function removeFromEvent(uint256 eventId, uint256 amount) external {
-        insurer.removeFromEvent(eventId, amount);
+        insurer.removeFromEvent(msg.sender, eventId, amount);
     }
     function addInsurerCapital(uint256 amount) external nonReentrant {
         require(userBalances[msg.sender] >= amount, "Insufficient balance");
@@ -281,4 +281,8 @@ contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
         emit ClaimProcessed(policyHolderAddr, policyId, payout);
     }
     event ClaimProcessed(address indexed policyHolder, uint256 indexed policyId, uint256 payout);
+
+    function getEventCount() public view returns (uint256) {
+        return IInsuranceEvents(eventsLogic).getEventCount();
+    }
 } 

@@ -2,16 +2,9 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./InsuranceStorage.sol";
 
-contract InsuranceReinsurer {
-    IERC20 public paymentToken;
-    struct Reinsurer {
-        uint256 collateral;
-        uint256 consumedCapital;
-        uint256 totalPremiums;
-        bool isActive;
-    }
-    mapping(address => Reinsurer) public reinsurers;
+contract InsuranceReinsurer is InsuranceStorage {
     event ReinsurerRegistered(address indexed reinsurer, uint256 collateral);
     event ReinsurerCapitalAdded(address indexed reinsurer, uint256 amount);
 
@@ -32,22 +25,26 @@ contract InsuranceReinsurer {
             collateral: collateral,
             consumedCapital: 0,
             totalPremiums: 0,
-            isActive: true
+            isActive: true,
+            lastPremiumClaim: 0,
+            accumulatedPremiums: 0
         });
+        reinsurerList.push(reinsurerAddr);
         emit ReinsurerRegistered(reinsurerAddr, collateral);
     }
 
     /**
      * @dev Add additional capital to an existing reinsurer (virtual transfer)
+     * @param reinsurerAddr Address of the reinsurer to add capital to
      * @param amount Amount to add (will be handled by InsuranceCore)
      */
-    function addReinsurerCapital(uint256 amount) external {
-        require(reinsurers[msg.sender].isActive, "Not registered");
+    function addReinsurerCapital(address reinsurerAddr, uint256 amount) external {
+        require(reinsurers[reinsurerAddr].isActive, "Not registered");
         require(amount > 0, "Amount must be greater than 0");
         
         // Virtual transfer handled by InsuranceCore
-        reinsurers[msg.sender].collateral += amount;
-        emit ReinsurerCapitalAdded(msg.sender, amount);
+        reinsurers[reinsurerAddr].collateral += amount;
+        emit ReinsurerCapitalAdded(reinsurerAddr, amount);
     }
 
     // Placeholder functions for interface compatibility
@@ -61,27 +58,40 @@ contract InsuranceReinsurer {
 
     function getTotalReinsurerCapital() external view returns (uint256) {
         uint256 total = 0;
-        // Would iterate through all reinsurers and sum collateral
+        for (uint256 i = 0; i < reinsurerList.length; i++) {
+            address reinsurerAddr = reinsurerList[i];
+            if (reinsurers[reinsurerAddr].isActive) {
+                total += reinsurers[reinsurerAddr].collateral;
+            }
+        }
         return total;
     }
 
     function getReinsurerCount() external view returns (uint256) {
-        // Would return count of active reinsurers
-        return 0;
+        return reinsurerList.length;
     }
 
     function getReinsurerByIndex(uint256 index) external view returns (address) {
-        // Would return reinsurer address by index
-        return address(0);
+        require(index < reinsurerList.length, "Index out of bounds");
+        return reinsurerList[index];
+    }
+
+    function isRegisteredReinsurer(address reinsurerAddr) external view returns (bool isActive) {
+        return reinsurers[reinsurerAddr].isActive;
+    }
+
+    function getReinsurerCollateral(address reinsurerAddr) external view returns (uint256) {
+        return reinsurers[reinsurerAddr].collateral;
     }
 }
 
 interface IInsuranceReinsurer {
     function registerReinsurer(address reinsurerAddr, uint256 collateral) external;
-    function addReinsurerCapital(uint256 amount) external;
+    function addReinsurerCapital(address reinsurerAddr, uint256 amount) external;
     function claimReinsurerPremiums() external;
     function getReinsurerAccumulatedPremiums(address reinsurerAddr) external view returns (uint256);
     function getTotalReinsurerCapital() external view returns (uint256);
     function getReinsurerCount() external view returns (uint256);
     function getReinsurerByIndex(uint256 index) external view returns (address);
+    function isRegisteredReinsurer(address reinsurerAddr) external view returns (bool isActive);
 } 

@@ -39,7 +39,7 @@ contract InsuranceTest is Test {
         mockToken = new MockToken();
         oracle = new InsuranceOracle();
         policyHolder = new InsurancePolicyHolder(address(mockToken));
-        insurer = new InsuranceInsurer(address(mockToken));
+        insurer = new InsuranceInsurer(address(mockToken), address(policyHolder));
         reinsurer = new InsuranceReinsurer(address(mockToken));
         eventsLogic = new InsuranceEvents();
         insurance = new InsuranceCore(address(mockToken), address(policyHolder), address(insurer), address(reinsurer), address(eventsLogic));
@@ -95,7 +95,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
         (uint256 totalCollateral, , , , bool isActive) = insurer.insurers(alice);
@@ -112,7 +112,7 @@ contract InsuranceTest is Test {
         // Register as reinsurer through InsuranceCore
         insurance.registerReinsurer(20000e18);
         vm.stopPrank();
-        (uint256 collateral, , , bool isActive) = reinsurer.reinsurers(bob);
+        (uint256 collateral, , , bool isActive, , ) = reinsurer.reinsurers(bob);
         assertTrue(isActive);
         assertEq(collateral, 20000e18);
     }
@@ -126,7 +126,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
         // Buy policy
@@ -172,7 +172,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         emit log_string("Insurer registered and capital allocated");
         vm.stopPrank();
@@ -224,7 +224,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
         uint256 premium = insurance.calculatePremium(btcEventId, 1000e18);
@@ -242,7 +242,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
         // Register reinsurer
@@ -287,9 +287,9 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 5000e18);
+        insurer.allocateToEvent(alice, btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
-        insurer.allocateToEvent(aaveEventId, 5000e18);
+        insurer.allocateToEvent(alice, aaveEventId, 5000e18);
         policyHolder.setEventInsurerCapital(aaveEventId, 5000e18);
         vm.stopPrank();
         // Buy two policies
@@ -413,13 +413,17 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurance.addInsurerCapital(5000e18);
-        insurer.allocateToEvent(btcEventId, 5000e18);
+        insurer.allocateToEvent(alice, btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
-        vm.stopPrank();
+        // At this point, only 10000e18 should be in totalCollateral
         (uint256 totalCollateral, , , , bool isActive) = insurer.insurers(alice);
         assertTrue(isActive);
+        assertEq(totalCollateral, 10000e18);
+        // Now add more capital and check again
+        insurance.addInsurerCapital(5000e18);
+        (totalCollateral, , , , ) = insurer.insurers(alice);
         assertEq(totalCollateral, 15000e18);
+        vm.stopPrank();
     }
 
     function testAddInsurerCapitalMultipleTimes() public {
@@ -430,18 +434,18 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         // Add capital multiple times
         insurance.addInsurerCapital(5000e18);
-        insurer.allocateToEvent(btcEventId, 5000e18);
+        insurer.allocateToEvent(alice, btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
         insurance.addInsurerCapital(3000e18);
-        insurer.allocateToEvent(btcEventId, 3000e18);
+        insurer.allocateToEvent(alice, btcEventId, 3000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 3000e18);
         insurance.addInsurerCapital(2000e18);
-        insurer.allocateToEvent(btcEventId, 2000e18);
+        insurer.allocateToEvent(alice, btcEventId, 2000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 2000e18);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
         assertEq(finalCollateral, 20000e18);
@@ -457,12 +461,12 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         uint256 largeAmount = 50000e18;
         insurance.addInsurerCapital(largeAmount);
-        insurer.allocateToEvent(btcEventId, largeAmount);
+        insurer.allocateToEvent(alice, btcEventId, largeAmount);
         policyHolder.setEventInsurerCapital(btcEventId, largeAmount);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
         assertEq(finalCollateral, 60000e18);
@@ -478,12 +482,12 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         uint256 smallAmount = 1e18;
         insurance.addInsurerCapital(smallAmount);
-        insurer.allocateToEvent(btcEventId, smallAmount);
+        insurer.allocateToEvent(alice, btcEventId, smallAmount);
         policyHolder.setEventInsurerCapital(btcEventId, smallAmount);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
         assertEq(finalCollateral, 10001e18);
@@ -499,7 +503,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         ( , , uint256 initialConsumedCapital, , ) = insurer.insurers(alice);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         vm.stopPrank();
@@ -513,7 +517,7 @@ contract InsuranceTest is Test {
         vm.stopPrank();
         vm.startPrank(alice);
         insurance.addInsurerCapital(5000e18);
-        insurer.allocateToEvent(btcEventId, 5000e18);
+        insurer.allocateToEvent(alice, btcEventId, 5000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 5000e18);
         (uint256 finalCollateral, , uint256 finalConsumedCapital, , ) = insurer.insurers(alice);
         assertEq(finalCollateral, 15000e18);
@@ -529,7 +533,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         
         uint256 balanceBefore = insurance.getUserBalance(alice);
@@ -551,7 +555,7 @@ contract InsuranceTest is Test {
         
         // Register as insurer through InsuranceCore
         insurance.registerInsurer(10000e18);
-        insurer.allocateToEvent(btcEventId, 10000e18);
+        insurer.allocateToEvent(alice, btcEventId, 10000e18);
         policyHolder.setEventInsurerCapital(btcEventId, 10000e18);
         
         uint256 contractBalanceBefore = mockToken.balanceOf(address(insurance));

@@ -30,7 +30,7 @@ contract DeployInsurance is Script {
 
         // Deploy modular contracts
         InsurancePolicyHolder policyHolder = new InsurancePolicyHolder(address(mockToken));
-        InsuranceInsurer insurer = new InsuranceInsurer(address(mockToken));
+        InsuranceInsurer insurer = new InsuranceInsurer(address(mockToken), address(policyHolder));
         InsuranceReinsurer reinsurer = new InsuranceReinsurer(address(mockToken));
         InsuranceEvents eventsLogic = new InsuranceEvents();
         
@@ -67,6 +67,10 @@ contract DeployInsurance is Script {
         );
 
         // After deploying contracts
+        policyHolder.setEventsLogic(address(eventsLogic));
+        policyHolder.setInsurer(address(insurer));
+        insurer.setPolicyHolder(address(policyHolder));
+        insurer.setEventsLogic(address(eventsLogic));
         insurer.setCore(address(insurance));
 
         vm.stopBroadcast();

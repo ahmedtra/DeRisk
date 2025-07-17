@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title InsuranceOracle
@@ -47,7 +47,7 @@ contract InsuranceOracle is Ownable, Pausable {
         _;
     }
 
-    constructor() {
+    constructor() Ownable(msg.sender) {
         // Initialize with some common assets
         _initializeAssets();
     }

@@ -2,15 +2,15 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+
 import "./InsuranceEvents.sol";
 
 contract InsurancePolicyHolder {
-    using Counters for Counters.Counter;
+
 
     IERC20 public paymentToken;
     uint256 public LOCKUP_PERIOD = 7 days;
-    Counters.Counter private _policyIds;
+    uint256 private _policyIds;
 
     struct Policy {
         address policyHolder;
@@ -26,6 +26,7 @@ contract InsurancePolicyHolder {
     event PolicyCreated(uint256 indexed policyId, address indexed policyHolder, uint256 indexed eventId, uint256 premium, uint256 coverage);
     event PolicyActivated(uint256 indexed policyId, uint256 activationTime);
     event PolicyClaimed(uint256 indexed policyId, uint256 payout);
+    event Debug(string message);
 
     InsuranceEvents public eventsLogic;
     mapping(uint256 => uint256) public eventInsurerCapital; // eventId => total insurer capital (stub for now)
@@ -44,21 +45,28 @@ contract InsurancePolicyHolder {
     }
 
     function buyPolicy(address policyHolderAddr, uint256 eventId, uint256 coverage, uint256 premium) external {
+        emit Debug("Start buyPolicy");
         // Check event exists and is active
         (string memory name,,,,,,,,bool isActive,,,) = eventsLogic.getEvent(eventId);
+        emit Debug("Got event from eventsLogic");
         require(bytes(name).length != 0, "Event does not exist");
+        emit Debug("Event exists");
         require(isActive, "Event not active");
+        emit Debug("Event is active");
         // Check insurer capital
         require(eventInsurerCapital[eventId] > 0, "No insurer capital for event");
+        emit Debug("Insurer capital set");
         require(coverage > 0, "Coverage must be > 0");
+        emit Debug("Coverage > 0");
         require(premium > 0, "Premium must be > 0");
+        emit Debug("Premium > 0");
         
         // For virtual token management, we need to check if the user has sufficient balance
         // This will be handled by the InsuranceCore contract calling this function
         // The actual token transfer is handled at the InsuranceCore level
         
-        _policyIds.increment();
-        uint256 policyId = _policyIds.current();
+        _policyIds++;
+        uint256 policyId = _policyIds;
         policies[policyId] = Policy({
             policyHolder: policyHolderAddr,
             eventId: eventId,
@@ -104,6 +112,28 @@ contract InsurancePolicyHolder {
         );
     }
 
+    function getPolicyCount() external view returns (uint256) {
+        return _policyIds;
+    }
+
+    function getUserPolicyIds(address user) external view returns (uint256[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 1; i <= _policyIds; i++) {
+            if (policies[i].policyHolder == user) {
+                count++;
+            }
+        }
+        uint256[] memory result = new uint256[](count);
+        uint256 idx = 0;
+        for (uint256 i = 1; i <= _policyIds; i++) {
+            if (policies[i].policyHolder == user) {
+                result[idx] = i;
+                idx++;
+            }
+        }
+        return result;
+    }
+
     function setEventInsurerCapital(uint256 eventId, uint256 amount) external {
         eventInsurerCapital[eventId] = amount;
     }
@@ -141,4 +171,6 @@ interface IInsurancePolicyHolder {
         bool isActive,
         bool isClaimed
     );
+    function setEventInsurerCapital(uint256 eventId, uint256 amount) external;
+    function markPolicyClaimed(uint256 policyId) external;
 } 

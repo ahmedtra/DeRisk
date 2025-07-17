@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./InsurancePolicyHolder.sol";
 import "./InsuranceEvents.sol";
+import { IInsurancePolicyHolder } from "./InsurancePolicyHolder.sol";
 
 contract InsuranceInsurer {
     IERC20 public paymentToken;
@@ -13,20 +14,23 @@ contract InsuranceInsurer {
         uint256 consumedCapital;
         uint256 totalPremiums;
         bool isActive;
+        mapping(uint256 => uint256) eventAllocations; // eventId => amount
     }
     mapping(address => Insurer) public insurers;
+    address[] public insurerList;
     event InsurerRegistered(address indexed insurer, uint256 collateral);
     event InsurerCapitalAdded(address indexed insurer, uint256 amount);
     event CapitalAllocated(address indexed insurer, uint256 eventId, uint256 amount);
 
     uint256 public constant MIN_COLLATERAL = 1000 ether;
 
-    InsurancePolicyHolder public policyHolder;
+    IInsurancePolicyHolder public policyHolder;
     InsuranceEvents public eventsLogic;
     address public core;
 
-    constructor(address _paymentToken) {
+    constructor(address _paymentToken, address _policyHolder) {
         paymentToken = IERC20(_paymentToken);
+        policyHolder = IInsurancePolicyHolder(_policyHolder);
     }
 
     /**
@@ -39,13 +43,14 @@ contract InsuranceInsurer {
         require(collateral >= MIN_COLLATERAL, "Insufficient collateral");
         
         // No actual transfer needed - virtual transfer already done in InsuranceCore
-        insurers[insurerAddr] = Insurer({
-            totalCollateral: collateral,
-            availableCollateral: collateral,
-            consumedCapital: 0,
-            totalPremiums: 0,
-            isActive: true
-        });
+        Insurer storage ins = insurers[insurerAddr];
+        ins.totalCollateral = collateral;
+        ins.availableCollateral = collateral;
+        ins.consumedCapital = 0;
+        ins.totalPremiums = 0;
+        ins.isActive = true;
+        insurerList.push(insurerAddr);
+        // eventAllocations mapping is left as default (empty)
         emit InsurerRegistered(insurerAddr, collateral);
     }
 
@@ -64,12 +69,55 @@ contract InsuranceInsurer {
         emit InsurerCapitalAdded(insurerAddr, amount);
     }
 
-    function allocateToEvent(uint256 eventId, uint256 amount) external {
-        require(insurers[msg.sender].isActive, "Not registered");
-        require(insurers[msg.sender].availableCollateral >= amount, "Insufficient collateral");
-        insurers[msg.sender].availableCollateral -= amount;
-        // Allocation logic would go here (event mapping, etc.)
-        emit CapitalAllocated(msg.sender, eventId, amount);
+    function allocateToEvent(address insurerAddr, uint256 eventId, uint256 amount) external {
+        require(insurers[insurerAddr].isActive, "Not registered");
+        require(insurers[insurerAddr].availableCollateral >= amount, "Insufficient collateral");
+        insurers[insurerAddr].availableCollateral -= amount;
+        insurers[insurerAddr].eventAllocations[eventId] += amount; // Store allocation
+        emit CapitalAllocated(insurerAddr, eventId, amount);
+        // Update total insurer capital in PolicyHolder
+        uint256 total = getEventTotalInsurerCapital(eventId);
+        policyHolder.setEventInsurerCapital(eventId, total);
+    }
+
+    function removeFromEvent(address insurerAddr, uint256 eventId, uint256 amount) external {
+        // Implement logic as needed, using insurerAddr
+    }
+
+    function claimInsurerPremiums() external {
+        // Implement logic to claim premiums
+    }
+
+    function getInsurerEventAllocation(address insurerAddr, uint256 eventId) external view returns (uint256) {
+        return insurers[insurerAddr].eventAllocations[eventId];
+    }
+
+    function getInsurerAllocatedEvents(address insurerAddr) external view returns (uint256[] memory) {
+        // Implement logic to get allocated events
+        return new uint256[](0);
+    }
+
+    function getEventInsurers(uint256 eventId) external view returns (address[] memory) {
+        // Implement logic to get insurers for an event
+        return new address[](0);
+    }
+
+    function getEventTotalInsurerCapital(uint256 eventId) public view returns (uint256) {
+        uint256 total = 0;
+        for (uint i = 0; i < insurerList.length; i++) {
+            total += insurers[insurerList[i]].eventAllocations[eventId];
+        }
+        return total;
+    }
+
+    function getInsurerAccumulatedPremiums(address insurerAddr) external view returns (uint256) {
+        // Implement logic to get accumulated premiums
+        return 0;
+    }
+
+    function getInsurerCount() external view returns (uint256) {
+        // Implement logic to get insurer count
+        return 0;
     }
 
     function setCore(address _core) external {
@@ -94,7 +142,7 @@ contract InsuranceInsurer {
     }
 
     function setPolicyHolder(address _policyHolder) external {
-        policyHolder = InsurancePolicyHolder(_policyHolder);
+        policyHolder = IInsurancePolicyHolder(_policyHolder);
     }
 
     function setEventsLogic(address _eventsLogic) external {
@@ -114,8 +162,8 @@ contract InsuranceInsurer {
 interface IInsuranceInsurer {
     function registerInsurer(address insurerAddr, uint256 collateral) external;
     function addInsurerCapital(address insurerAddr, uint256 amount) external;
-    function allocateToEvent(uint256 eventId, uint256 amount) external;
-    function removeFromEvent(uint256 eventId, uint256 amount) external;
+    function allocateToEvent(address insurerAddr, uint256 eventId, uint256 amount) external;
+    function removeFromEvent(address insurerAddr, uint256 eventId, uint256 amount) external;
     function claimInsurerPremiums() external;
     function getInsurerEventAllocation(address insurerAddr, uint256 eventId) external view returns (uint256);
     function getInsurerAllocatedEvents(address insurerAddr) external view returns (uint256[] memory);

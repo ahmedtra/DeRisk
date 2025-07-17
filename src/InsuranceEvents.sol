@@ -63,6 +63,10 @@ contract InsuranceEvents {
         );
     }
 
+    function getEventCount() public view returns (uint256) {
+        return _eventIds;
+    }
+
     function registerEvent(
         string memory name,
         string memory description,
@@ -130,4 +134,5 @@ interface IInsuranceEvents {
     function getTotalAccumulatedPremiums() external view returns (uint256);
     function triggerEvent(uint256 eventId) external;
     function calculatePremium(uint256 eventId, uint256 coverage) external view returns (uint256);
+    function getEventCount() external view returns (uint256);
 } 
