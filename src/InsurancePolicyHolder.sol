@@ -145,7 +145,12 @@ contract InsurancePolicyHolder {
         require(!policy.isClaimed, "Already claimed");
         (,,,bool isTriggered,,,,,,,,) = eventsLogic.getEvent(policy.eventId);
         require(isTriggered, "Event not triggered");
-        // No payout here. Insurer will handle payout and marking as claimed.
+        
+        // Mark the policy as claimed automatically
+        policy.isClaimed = true;
+        emit PolicyClaimed(policyId, policy.coverage);
+        
+        // No payout here. Insurer will handle payout.
     }
 
     function markPolicyClaimed(uint256 policyId) external {
@@ -171,6 +176,7 @@ interface IInsurancePolicyHolder {
         bool isActive,
         bool isClaimed
     );
+    function getPolicyCount() external view returns (uint256);
     function setEventInsurerCapital(uint256 eventId, uint256 amount) external;
     function markPolicyClaimed(uint256 policyId) external;
 } 

@@ -1,0 +1,508 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import "./InsuranceStorage.sol";
+import "./InsuranceEvents.sol";
+import "./InsuranceInsurer.sol";
+import "./InsuranceReinsurer.sol";
+import "./InsurancePolicyHolder.sol";
+import "./InsuranceReinsuranceMath.sol";
+
+/**
+ * @title InsuranceCore
+ * @dev Core insurance contract for hedging against tail events
+ * Features:
+ * - Policy holders can buy insurance against specific events
+ * - Two-layer insurance system (insurers and reinsurers)
+ * - Dynamic premium pricing based on collateral and demand
+ * - 7-day lockup period for new policies
+ * - Capital allocation to specific events
+ * - Continuous premium distribution based on dynamic APY
+ * - Virtual token management for efficient cross-contract operations
+ */
+contract InsuranceCore is InsuranceStorage, Ownable, ReentrancyGuard {
+
+    
+    // All state variables and constants have been moved to InsuranceStorage.sol
+    // Do not redeclare them here.
+
+    IInsurancePolicyHolder public policyHolder;
+    IInsuranceInsurer public insurer;
+    IInsuranceReinsurer public reinsurer;
+    IInsuranceEvents public eventsLogic;
+    InsuranceReinsuranceMath public reinsuranceMath;
+
+    constructor(address _paymentToken, address _policyHolder, address _insurer, address _reinsurer, address _eventsLogic, address _reinsuranceMath) Ownable(msg.sender) {
+        paymentToken = IERC20(_paymentToken);
+        policyHolder = IInsurancePolicyHolder(_policyHolder);
+        insurer = IInsuranceInsurer(_insurer);
+        reinsurer = IInsuranceReinsurer(_reinsurer);
+        eventsLogic = IInsuranceEvents(_eventsLogic);
+        reinsuranceMath = InsuranceReinsuranceMath(_reinsuranceMath);
+        
+        // Initialize reinsurance data with default values
+        initializeReinsuranceData();
+    }
+    
+    /**
+     * @dev Initialize reinsurance data with default values
+     * This ensures the premium calculation functions work properly
+     */
+    function initializeReinsuranceData() internal {
+        // Set initial reinsurance data
+        // These values will be updated as insurers and reinsurers register
+        reinsuranceMath.updateReinsuranceData(
+            1000 * 1e18, // 1000 tokens total capital
+            500 * 1e18,  // 500 tokens reinsurance capital
+            100 * 1e18,  // 100 tokens expected reinsurance loss
+            200 * 1e18   // 200 tokens total expected loss
+        );
+    }
+
+    /**
+     * @dev Update reinsurance data based on current system state
+     * This should be called whenever insurer or reinsurer capital changes
+     */
+    function updateReinsuranceData() internal {
+        // Get current reinsurance data
+        InsuranceReinsuranceMath.ReinsuranceData memory currentData = reinsuranceMath.getReinsuranceData();
+        
+        // For now, we'll use the current values and update them incrementally
+        reinsuranceMath.updateReinsuranceData(
+            currentData.totalCapital,
+            currentData.reinsuranceCapital,
+            100 * 1e18, // Expected reinsurance loss (placeholder)
+            200 * 1e18  // Total expected loss (placeholder)
+        );
+    }
+    
+    /**
+     * @dev Update reinsurance data when insurer capital changes
+     */
+    function updateInsurerReinsuranceData() internal {
+        updateReinsuranceData();
+    }
+    
+    /**
+     * @dev Update reinsurance data when reinsurer capital changes
+     */
+    function updateReinsurerReinsuranceData() internal {
+        updateReinsuranceData();
+    }
+
+    // --- Virtual Token Management Functions ---
+
+    /**
+     * @dev Deposit tokens into the system for virtual management
+     * @param amount Amount of tokens to deposit
+     */
+    function depositTokens(uint256 amount) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(paymentToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        
+        userBalances[msg.sender] += amount;
+        totalSystemLiquidity += amount;
+        
+        emit TokensDeposited(msg.sender, amount);
+    }
+
+    /**
+     * @dev Withdraw tokens from user's virtual balance
+     * @param amount Amount of tokens to withdraw
+     */
+    function withdrawTokens(uint256 amount) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(userBalances[msg.sender] >= amount, "Insufficient balance");
+        
+        userBalances[msg.sender] -= amount;
+        totalSystemLiquidity -= amount;
+        
+        require(paymentToken.transfer(msg.sender, amount), "Transfer failed");
+        
+        emit TokensWithdrawn(msg.sender, amount);
+    }
+
+    /**
+     * @dev Get user's total available balance (deposited - locked in roles)
+     */
+    function getUserBalance(address user) external view returns (uint256) {
+        return userBalances[user];
+    }
+
+    /**
+     * @dev Get user's total locked collateral across all roles
+     */
+    function getUserLockedCollateral(address user) external view returns (uint256) {
+        return insurerCollateral[user] + reinsurerCollateral[user] + policyHolderFunds[user];
+    }
+
+    // --- Only interface calls to eventsLogic and coordination logic below ---
+
+    // Register a new insurance event
+    function registerEvent(
+        string memory name,
+        string memory description,
+        uint256 triggerThreshold,
+        uint256 basePremium
+    ) external {
+        eventsLogic.registerEvent(name, description, triggerThreshold, basePremium);
+    }
+
+    // Get event details via interface
+    function getEvent(uint256 eventId) external view returns (
+        string memory name,
+        string memory description,
+        uint256 triggerThreshold,
+        bool isTriggered,
+        uint256 triggerTime,
+        uint256 totalCoverage,
+        uint256 totalPremiums,
+        uint256 basePremium,
+        bool isActive,
+        uint256 totalInsurerCapital,
+        uint256 lastPremiumDistribution,
+        uint256 accumulatedPremiums
+    ) {
+        return eventsLogic.getEvent(eventId);
+    }
+
+    // Policy functions
+    function buyPolicy(uint256 eventId, uint256 coverage, uint256 premium) external nonReentrant {
+        require(userBalances[msg.sender] >= premium, "Insufficient balance");
+        
+        // Get event data to calculate dynamic premium
+        (,,,,,,,,uint256 totalInsurerCapital,,) = eventsLogic.getEvent(eventId);
+        
+        // Calculate dynamic premium using reinsurance math
+        uint256 dynamicPremium = calculateDynamicPremium(eventId, coverage, totalInsurerCapital);
+        
+        // Use the calculated premium instead of the input premium
+        uint256 finalPremium = dynamicPremium > 0 ? dynamicPremium : premium;
+        
+        // Ensure user has enough balance for the calculated premium
+        require(userBalances[msg.sender] >= finalPremium, "Insufficient balance for calculated premium");
+        
+        // Virtual transfer: move tokens from user balance to policy holder funds
+        userBalances[msg.sender] -= finalPremium;
+        policyHolderFunds[msg.sender] += finalPremium;
+        
+        // Accumulate premiums in the events contract
+        eventsLogic.accumulatePremiums(eventId, finalPremium);
+        
+        // Call the policy holder contract with the calculated premium
+        policyHolder.buyPolicy(msg.sender, eventId, coverage, finalPremium);
+        
+        emit PolicyPremiumCalculated(msg.sender, eventId, coverage, finalPremium);
+    }
+    
+    /**
+     * @dev Calculate dynamic premium using reinsurance math
+     * This function automatically calculates the optimal premium based on:
+     * - Event risk parameters
+     * - Insurer capital allocation
+     * - Reinsurer capital
+     * - Policy coverage amount
+     */
+    function calculateDynamicPremium(uint256 eventId, uint256 coverage, uint256 totalInsurerCapital) internal returns (uint256) {
+        // Get reinsurance data
+        InsuranceReinsuranceMath.ReinsuranceData memory reinsurance = reinsuranceMath.getReinsuranceData();
+        
+        if (reinsurance.totalCapital == 0 || reinsurance.reinsuranceCapital == 0) {
+            return 0; // Return 0 to use fallback premium
+        }
+        
+        // Get event risk parameters - we'll use default values for now since the mapping functions aren't in the interface
+        uint256 expectedLossRatio = 1000; // 10% default
+        uint256 totalLossRatio = 2000; // 20% default
+        
+        // Calculate beta for this event based on insurer capital allocation
+        uint256 beta = totalInsurerCapital > 0 ? (totalInsurerCapital * 10000) / reinsurance.totalCapital : 5000; // Default 50%
+        
+        // Solve for event probability and max premium
+        (uint256 eventProbability, uint256 maxPremium) = reinsuranceMath.solveForEventProbabilityAndMaxPremium(
+            totalInsurerCapital,
+            coverage,
+            beta,
+            expectedLossRatio,
+            totalLossRatio,
+            reinsurance.reinsuranceCapital,
+            reinsurance.totalCapital
+        );
+        
+        // Calculate shared risk premium distribution
+        uint256 sharedRiskPremium = reinsuranceMath.calculateSharedRiskPremium(
+            beta,
+            reinsurance.reinsuranceCapital,
+            reinsurance.totalCapital,
+            maxPremium
+        );
+        
+        // Update event risk parameters for future calculations
+        eventsLogic.updateEventRiskParameters(eventId, expectedLossRatio, totalLossRatio, maxPremium);
+        
+        return sharedRiskPremium;
+    }
+    function activatePolicy(uint256 policyId) external {
+        policyHolder.activatePolicy(msg.sender, policyId);
+    }
+    function getPolicy(uint256 policyId) external view returns (
+        address policyHolder_,
+        uint256 eventId,
+        uint256 coverage,
+        uint256 premium,
+        uint256 startTime,
+        uint256 activationTime,
+        bool isActive,
+        bool isClaimed
+    ) {
+        return policyHolder.getPolicy(policyId);
+    }
+
+    // Insurer functions - Updated for virtual token management
+    function registerInsurer(uint256 collateral) external nonReentrant {
+        require(userBalances[msg.sender] >= collateral, "Insufficient balance");
+        require(collateral >= MIN_COLLATERAL, "Insufficient collateral");
+        
+        // Virtual transfer: move tokens from user balance to insurer collateral
+        userBalances[msg.sender] -= collateral;
+        insurerCollateral[msg.sender] += collateral;
+        
+        // Register in InsuranceInsurer contract
+        insurer.registerInsurer(msg.sender, collateral);
+        
+        emit InsurerRegistered(msg.sender, collateral);
+        updateInsurerReinsuranceData(); // Update reinsurance data after insurer registration
+    }
+
+    function allocateToEvent(uint256 eventId, uint256 amount) external {
+        insurer.allocateToEvent(msg.sender, eventId, amount);
+    }
+    function removeFromEvent(uint256 eventId, uint256 amount) external {
+        insurer.removeFromEvent(msg.sender, eventId, amount);
+    }
+    function addInsurerCapital(uint256 amount) external nonReentrant {
+        require(userBalances[msg.sender] >= amount, "Insufficient balance");
+        
+        // Check if user is registered as insurer through the InsuranceInsurer contract
+        require(insurer.isRegisteredInsurer(msg.sender), "Not registered as insurer");
+        
+        // Virtual transfer: move tokens from user balance to insurer collateral
+        userBalances[msg.sender] -= amount;
+        insurerCollateral[msg.sender] += amount;
+        
+        // Update the insurer contract
+        insurer.addInsurerCapital(msg.sender, amount);
+        
+        emit InsurerCapitalAdded(msg.sender, amount);
+        updateInsurerReinsuranceData(); // Update reinsurance data after insurer capital addition
+    }
+    function claimInsurerPremiums() external {
+        insurer.claimInsurerPremiums();
+    }
+    function getInsurerEventAllocation(address insurerAddr, uint256 eventId) external view returns (uint256) {
+        return insurer.getInsurerEventAllocation(insurerAddr, eventId);
+    }
+    function getInsurerAllocatedEvents(address insurerAddr) external view returns (uint256[] memory) {
+        return insurer.getInsurerAllocatedEvents(insurerAddr);
+    }
+    function getEventInsurers(uint256 eventId) external view returns (address[] memory) {
+        return insurer.getEventInsurers(eventId);
+    }
+    function getEventTotalInsurerCapital(uint256 eventId) external view returns (uint256) {
+        return insurer.getEventTotalInsurerCapital(eventId);
+    }
+    function getInsurerAccumulatedPremiums(address insurerAddr) external view returns (uint256) {
+        return insurer.getInsurerAccumulatedPremiums(insurerAddr);
+    }
+
+    // Reinsurer functions - Updated for virtual token management
+    function registerReinsurer(uint256 collateral) external nonReentrant {
+        require(userBalances[msg.sender] >= collateral, "Insufficient balance");
+        require(collateral >= MIN_COLLATERAL, "Insufficient collateral");
+        
+        // Virtual transfer: move tokens from user balance to reinsurer collateral
+        userBalances[msg.sender] -= collateral;
+        reinsurerCollateral[msg.sender] += collateral;
+        
+        // Register in InsuranceReinsurer contract
+        reinsurer.registerReinsurer(msg.sender, collateral);
+        
+        emit ReinsurerRegistered(msg.sender, collateral);
+        updateReinsurerReinsuranceData(); // Update reinsurance data after reinsurer registration
+    }
+
+    function claimReinsurerPremiums() external {
+        reinsurer.claimReinsurerPremiums();
+    }
+    
+    function addReinsurerCapital(uint256 amount) external nonReentrant {
+        require(userBalances[msg.sender] >= amount, "Insufficient balance");
+        require(amount > 0, "Amount must be greater than 0");
+        
+        // Virtual transfer: move tokens from user balance to reinsurer collateral
+        userBalances[msg.sender] -= amount;
+        reinsurerCollateral[msg.sender] += amount;
+        
+        // Add capital in InsuranceReinsurer contract
+        reinsurer.addReinsurerCapital(msg.sender, amount);
+        
+        emit ReinsurerCapitalAdded(msg.sender, amount);
+        updateReinsurerReinsuranceData(); // Update reinsurance data after reinsurer capital addition
+    }
+    
+    function getReinsurerCollateral(address reinsurerAddr) external view returns (uint256) {
+        return reinsurerCollateral[reinsurerAddr];
+    }
+    
+    function isRegisteredReinsurer(address reinsurerAddr) external view returns (bool) {
+        return reinsurer.isRegisteredReinsurer(reinsurerAddr);
+    }
+    
+    function getReinsurerAccumulatedPremiums(address reinsurerAddr) external view returns (uint256) {
+        return reinsurer.getReinsurerAccumulatedPremiums(reinsurerAddr);
+    }
+    function getTotalReinsurerCapital() public view returns (uint256) {
+        return reinsurer.getTotalReinsurerCapital();
+    }
+    function getReinsurerCount() public view returns (uint256) {
+        return reinsurer.getReinsurerCount();
+    }
+    function getInsurerCount() public view returns (uint256) {
+        return insurer.getInsurerCount();
+    }
+    function getReinsurerByIndex(uint256 index) public view returns (address) {
+        return reinsurer.getReinsurerByIndex(index);
+    }
+
+    // Premium distribution
+    function triggerPremiumDistribution() external {
+        eventsLogic.triggerPremiumDistribution();
+    }
+    function distributeAccumulatedPremiums() external {
+        eventsLogic.distributeAccumulatedPremiums();
+    }
+    function hasAccumulatedPremiums() external view returns (bool) {
+        return eventsLogic.hasAccumulatedPremiums();
+    }
+    function getTotalAccumulatedPremiums() external view returns (uint256) {
+        return eventsLogic.getTotalAccumulatedPremiums();
+    }
+
+    // Event trigger
+    function triggerEvent(uint256 eventId) external onlyOwner {
+        eventsLogic.triggerEvent(eventId);
+    }
+
+    // Premium calculation
+    function calculatePremium(uint256 eventId, uint256 coverage) external view returns (uint256) {
+        // Get basic premium from events contract
+        uint256 basePremium = eventsLogic.calculatePremium(eventId, coverage);
+        
+        // If reinsurance math is available, use advanced calculation
+        if (address(reinsuranceMath) != address(0)) {
+            return calculateAdvancedPremium(eventId, coverage, basePremium);
+        }
+        
+        return basePremium;
+    }
+    
+    /**
+     * @dev Calculate premium using advanced reinsurance math
+     */
+    function calculateAdvancedPremium(uint256 eventId, uint256 coverage, uint256 basePremium) internal view returns (uint256) {
+        // Get event risk parameters from events contract
+        (uint256 expectedLossRatio, uint256 totalLossRatio, uint256 maxPremium) = eventsLogic.getEventRiskParameters(eventId);
+        
+        // Calculate beta for this event (using default parameters)
+        uint256 mu = 1000; // 10% expected return parameter
+        uint256 totalExpectedLossRatioSum = reinsuranceMath.totalExpectedLossRatioSum();
+        if (totalExpectedLossRatioSum == 0) {
+            totalExpectedLossRatioSum = 5000; // Default to 50% if no data
+        }
+        
+        uint256 beta = reinsuranceMath.calculateBeta(
+            coverage, // insurer capital
+            coverage, // policy notional (using coverage as notional for this calculation)
+            totalExpectedLossRatioSum,
+            mu
+        );
+        
+        // Check if reinsurance data is available, if not, fall back to basic calculation
+        uint256 reinsuranceCapital = reinsuranceMath.getReinsuranceData().reinsuranceCapital;
+        uint256 totalCapital = reinsuranceMath.getReinsuranceData().totalCapital;
+        
+        if (totalCapital == 0) {
+            // No reinsurance data available, fall back to basic premium
+            return basePremium;
+        }
+        
+        // Use the solver to get both event probability and max premium
+        (uint256 eventProbability, uint256 solvedMaxPremium) = reinsuranceMath.solveForEventProbabilityAndMaxPremium(
+            coverage, // insurer capital
+            coverage, // policy notional
+            beta,
+            expectedLossRatio,
+            totalLossRatio,
+            reinsuranceCapital,
+            totalCapital
+        );
+        
+        // If solver didn't converge, use the event's max premium
+        if (solvedMaxPremium == 0) {
+            solvedMaxPremium = maxPremium;
+        }
+        
+        // Calculate premium using the shared risk premium formula
+        uint256 premium = reinsuranceMath.calculateSharedRiskPremium(
+            beta,
+            solvedMaxPremium, // reinsurance capital
+            solvedMaxPremium, // total capital
+            solvedMaxPremium  // max premium
+        );
+        
+        // Ensure premium is within reasonable bounds
+        uint256 maxAllowedPremium = maxPremium * coverage / 1e18;
+        
+        // If the advanced calculation returns a reasonable value, use it
+        // Otherwise fall back to base premium
+        if (premium > 0 && premium <= maxAllowedPremium * 10) { // Allow up to 10x max premium
+            return premium;
+        } else {
+            return basePremium;
+        }
+    }
+
+    // Events
+    event TokensDeposited(address indexed user, uint256 amount);
+    event TokensWithdrawn(address indexed user, uint256 amount);
+    event InsurerRegistered(address indexed insurer, uint256 collateral);
+    event ReinsurerRegistered(address indexed reinsurer, uint256 collateral);
+    event ReinsurerCapitalAdded(address indexed reinsurer, uint256 amount);
+    event InsurerCapitalAdded(address indexed insurer, uint256 amount);
+    event PolicyPremiumCalculated(address indexed policyHolder, uint256 indexed eventId, uint256 coverage, uint256 premium);
+
+    /**
+     * @dev Process a claim payout (called by InsuranceInsurer)
+     */
+    function processClaim(address policyHolderAddr, uint256 policyId, uint256 payout) external nonReentrant {
+        require(msg.sender == address(insurer), "Only insurer can process claim");
+        require(payout > 0, "Payout must be > 0");
+        // Optionally, check policy is not already claimed (for extra safety)
+        (,,,,,,,bool isClaimed) = policyHolder.getPolicy(policyId);
+        require(!isClaimed, "Policy already claimed");
+        // Credit payout to user's virtual balance
+        userBalances[policyHolderAddr] += payout;
+        // Optionally, deduct from insurer collateral (not implemented here, but can be added)
+        emit ClaimProcessed(policyHolderAddr, policyId, payout);
+    }
+    event ClaimProcessed(address indexed policyHolder, uint256 indexed policyId, uint256 payout);
+
+    function getEventCount() public view returns (uint256) {
+        return IInsuranceEvents(eventsLogic).getEventCount();
+    }
+} 

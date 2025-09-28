@@ -8,6 +8,7 @@ contract InsuranceStorage {
     IERC20 public paymentToken;
     uint256 public constant LOCKUP_PERIOD = 7 days;
     uint256 public constant MIN_COLLATERAL = 1000 * 1e18;
+    uint256 public constant REGISTRATION_FEE = 100 * 1e18; // 100 tokens registration fee
     uint256 public constant TARGET_APY_INSURER = 1500;
     uint256 public constant TARGET_APY_REINSURER = 1000;
     uint256 public lastDistributionTime;
@@ -16,10 +17,9 @@ contract InsuranceStorage {
 
     // Virtual token management
     mapping(address => uint256) public userBalances;        // User's available balance
-    mapping(address => uint256) public insurerCollateral;   // Insurer's locked collateral
-    mapping(address => uint256) public reinsurerCollateral; // Reinsurer's locked collateral
     mapping(address => uint256) public policyHolderFunds;   // Policy holder's funds (premiums paid)
     uint256 public totalSystemLiquidity;                   // Total tokens in the system
+    uint256 public protocolFees;                           // Accumulated protocol fees from registrations
 
     struct Policy {
         address policyHolder;
@@ -32,31 +32,5 @@ contract InsuranceStorage {
         bool isClaimed;
     }
 
-    struct Insurer {
-        uint256 totalCollateral;
-        uint256 availableCollateral;
-        uint256 consumedCapital;
-        uint256 totalPremiums;
-        bool isActive;
-        uint256[] insuredPolicies;
-        uint256[] allocatedEvents;
-        mapping(uint256 => uint256) eventAllocations;
-        uint256 lastPremiumClaim;
-        uint256 accumulatedPremiums;
-    }
-
-    struct Reinsurer {
-        uint256 collateral;
-        uint256 consumedCapital;
-        uint256 totalPremiums;
-        bool isActive;
-        uint256 lastPremiumClaim;
-        uint256 accumulatedPremiums;
-    }
-
     mapping(uint256 => Policy) public policies;
-    mapping(address => Insurer) public insurers;
-    mapping(address => Reinsurer) public reinsurers;
-    address[] public insurerList;
-    address[] public reinsurerList;
 } 
